@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Video Converter</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<header class="bar">
+  <div class="brand">
+    <span class="dot" id="statusDot"></span>
+    <h1>Video Converter</h1>
+  </div>
+  <div class="meta" id="toolInfo">Checking...</div>
+</header>
+
+<main>
+
+  <!-- Shown while ffmpeg is missing. Blocks conversion until resolved. -->
+  <section id="setup" class="card setup hidden">
+    <h2>One-time setup</h2>
+    <p id="setupText">
+      This app needs ffmpeg to convert videos. It is not installed on this
+      computer yet.
+    </p>
+    <button id="installBtn" class="primary">Install ffmpeg</button>
+    <pre id="installLog" class="log hidden" aria-live="polite"></pre>
+  </section>
+
+  <section id="dropzone" class="drop" tabindex="0" role="button"
+           aria-label="Choose videos to convert">
+    <svg viewBox="0 0 24 24" aria-hidden="true" class="icon">
+      <path d="M12 16V4m0 0L8 8m4-4 4 4" fill="none" stroke="currentColor"
+            stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" fill="none"
+            stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+    </svg>
+    <p class="drop-title">Choose videos</p>
+    <p class="drop-sub">
+      Click here and select the files you want &mdash; as many as you like
+    </p>
+    <p class="drop-note">
+      Files are read where they are &mdash; nothing is copied or moved.
+    </p>
+    <input type="file" id="fileInput" accept="video/*" multiple hidden>
+    <!-- Folder chooser, used only as a fallback when a picked file cannot be
+         located by name. Never shown unless it is needed. -->
+    <input type="file" id="folderInput" webkitdirectory directory multiple hidden>
+  </section>
+
+  <!-- Shown only when a file could not be found automatically. -->
+  <section id="pathbox" class="card pathbox hidden">
+    <label for="pathInput"><strong id="pathboxLabel">Where is that file?</strong></label>
+    <p class="pathbox-hint" id="pathboxHint"></p>
+    <div class="path-entry">
+      <input type="text" id="pathInput" spellcheck="false">
+      <button id="pathAdd" class="primary">Add</button>
+    </div>
+    <button id="pickFolderBtn" class="ghost">Or choose the folder instead</button>
+  </section>
+
+  <!-- Batch progress. Hidden until there is more than nothing to report. -->
+  <section id="batch" class="card batch hidden" aria-live="polite">
+    <div class="batch-head">
+      <strong id="batchLabel">Video 1 of 1</strong>
+      <span id="batchMeta" class="batch-meta"></span>
+    </div>
+    <div class="track batch-track"><div class="fill" id="batchFill"></div></div>
+    <div class="batch-foot">
+      <span id="batchCurrent" class="batch-current"></span>
+      <button id="cancelBtn" class="ghost danger">Stop after this file</button>
+    </div>
+  </section>
+
+  <section id="queue" class="queue" aria-live="polite"></section>
+
+  <section class="paths card">
+    <div class="path-row">
+      <span class="path-label">Saved to</span>
+      <code id="outputPath">-</code>
+      <button id="revealBtn" class="ghost">Open folder</button>
+    </div>
+  </section>
+
+</main>
+
+<script src="app.js"></script>
+</body>
+</html>

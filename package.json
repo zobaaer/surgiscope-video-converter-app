@@ -1,0 +1,15 @@
+{
+  "name": "video-converter-app",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Drag-and-drop video converter for the smart-cut profile",
+  "main": "main.js",
+  "bin": "main.js",
+  "scripts": {
+    "start": "node main.js",
+    "build": "node build.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
