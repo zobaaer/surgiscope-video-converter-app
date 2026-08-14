@@ -11,12 +11,14 @@
 // Run with: npm run build
 
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
 
 const HERE = __dirname;
 const DIST = path.join(HERE, 'dist');
 const BUILD = path.join(HERE, '.build');
+const SEA_FUSE = 'NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2';
 
 const LOCAL_MODULES = ['server', 'convert', 'ffmpeg', 'picker'];
 
@@ -110,6 +112,63 @@ function findOtherArchNode(wantArch) {
   return null;
 }
 
+function binaryHasSeaFuse(binaryPath) {
+  return fs.readFileSync(binaryPath).includes(SEA_FUSE);
+}
+
+// Package-manager Node builds (Homebrew in particular) lack the NODE_SEA_FUSE
+// marker postject needs, so fall back to the matching official nodejs.org
+// build, cached locally since the download is ~50-140MB.
+function resolveSeaSourceBinary() {
+  if (binaryHasSeaFuse(process.execPath)) return process.execPath;
+
+  step('  no SEA fuse marker in the active node -- fetching the official build...');
+
+  if (process.platform === 'win32') {
+    fail(
+      'the active Node build has no SEA fuse marker, and this script only knows how to\n' +
+      'auto-fetch a replacement for macOS/Linux. Install Node from https://nodejs.org\n' +
+      '(not a package manager) and rerun the build with that node.'
+    );
+  }
+
+  const version = process.version;
+  const platform = process.platform;
+  const arch = process.arch;
+  const cacheDir = path.join(os.homedir(), '.cache', 'video-converter-app', `node-${version}-${platform}-${arch}`);
+  const cachedBinary = path.join(cacheDir, 'bin', 'node');
+
+  if (fs.existsSync(cachedBinary) && binaryHasSeaFuse(cachedBinary)) {
+    step('  using cached copy');
+    return cachedBinary;
+  }
+
+  fs.rmSync(cacheDir, { recursive: true, force: true });
+  fs.mkdirSync(cacheDir, { recursive: true });
+
+  const tarName = `node-${version}-${platform}-${arch}.tar.gz`;
+  const tarUrl = `https://nodejs.org/dist/${version}/${tarName}`;
+  const tarPath = path.join(BUILD, tarName);
+
+  step(`  downloading ${tarUrl}`);
+  const download = spawnSync('curl', ['-sfL', '-o', tarPath, tarUrl], { encoding: 'utf8' });
+  if (download.status !== 0) {
+    fail(
+      `could not download the official Node build (${tarUrl}):\n` +
+      (download.stderr || '').trim() +
+      '\nInstall Node from https://nodejs.org directly and rerun the build with that node.'
+    );
+  }
+
+  step('  extracting...');
+  run('tar', ['-xzf', tarPath, '-C', cacheDir, '--strip-components=1']);
+
+  if (!binaryHasSeaFuse(cachedBinary)) {
+    fail(`downloaded Node build still lacks the SEA fuse marker: ${cachedBinary}`);
+  }
+  return cachedBinary;
+}
+
 function collectAssets() {
   const publicDir = path.join(HERE, 'public');
   const assets = {};
@@ -169,7 +228,11 @@ const exePath = path.join(DIST, exeName);
 const wantUniversal = process.argv.includes('--universal');
 
 step('Copying the Node runtime...');
-fs.copyFileSync(process.execPath, exePath);
+const seaSourceBinary = resolveSeaSourceBinary();
+fs.copyFileSync(seaSourceBinary, exePath);
+// copyFileSync mirrors the source file's permissions; Homebrew node is
+// read-only, which would otherwise block postject from writing to the copy.
+fs.chmodSync(exePath, 0o755);
 
 // On macOS the copied runtime carries the build host's architecture, and an
 // arm64 binary simply will not launch on an Intel Mac. Merging an x64 Node into
@@ -313,6 +376,10 @@ osascript \\
 `
   );
   fs.chmodSync(launcher, 0o755);
+
+  // Strip stray extended attributes (e.g. com.apple.provenance) -- codesign
+  // refuses to sign a bundle containing them.
+  spawnSync('xattr', ['-cr', appBundlePath], { encoding: 'utf8' });
 
   // Sign the bundle as a whole; signing only the inner binary leaves the
   // bundle itself unsigned and Gatekeeper rejects it on Apple Silicon.
