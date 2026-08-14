@@ -45,6 +45,9 @@ const VIDEO_EXT =
 let working = false;
 let stopRequested = false;
 const pending = [];
+// The AbortController behind whichever fetch is currently mid-conversion, so
+// Cancel can stop it immediately instead of waiting for it to finish.
+let currentAbort = null;
 
 // Batch bookkeeping, so the header can say "Video 3 of 8".
 const batchState = { total: 0, done: 0, failed: 0, startedAt: 0 };
@@ -466,7 +469,10 @@ function updateBatch(currentName, currentPercent) {
 cancelBtn.addEventListener('click', () => {
   stopRequested = true;
   cancelBtn.disabled = true;
-  cancelBtn.textContent = 'Stopping after this file...';
+  cancelBtn.textContent = 'Cancelling...';
+  // Stop the file in flight right away rather than waiting for it to finish;
+  // the server drops its partial output once it sees the request end.
+  if (currentAbort) currentAbort.abort();
   // Anything not yet started can be dropped immediately.
   while (pending.length) {
     const job = pending.shift();
@@ -482,7 +488,7 @@ async function pump() {
   working = true;
   stopRequested = false;
   cancelBtn.disabled = false;
-  cancelBtn.textContent = 'Stop after this file';
+  cancelBtn.textContent = 'Cancel';
   batchState.startedAt = performance.now();
   setDot('busy');
 
@@ -493,11 +499,17 @@ async function pump() {
       await runJob(job);
       batchState.done++;
     } catch (err) {
-      job.ui.setState('Failed');
-      job.ui.setNote(escapeHtml(err.message));
-      job.ui.finish('error');
-      batchState.failed++;
-      batchState.total--;
+      if (err.name === 'AbortError') {
+        job.ui.setState('Cancelled');
+        job.ui.finish('error');
+        batchState.total--;
+      } else {
+        job.ui.setState('Failed');
+        job.ui.setNote(escapeHtml(err.message));
+        job.ui.finish('error');
+        batchState.failed++;
+        batchState.total--;
+      }
     }
     updateBatch();
   }
@@ -515,38 +527,46 @@ async function runJob({ entry, ui }) {
   ui.setPercent(0);
   ui.setState('Starting...');
 
-  const res = await fetch('api/convert', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ path: entry.path }),
-  });
-  if (!res.ok) {
-    throw new Error((await res.json().catch(() => ({}))).error || 'conversion failed');
-  }
+  const controller = new AbortController();
+  currentAbort = controller;
 
-  const eta = createEta();
-  let failure = null;
-
-  await readStream(res, (event) => {
-    if (event.type === 'progress') {
-      ui.setPercent(event.percent);
-      // Progress is reported in seconds of video encoded, so "done" and "total"
-      // for the estimator are media seconds rather than bytes.
-      const left = event.duration ? eta.update(event.seconds, event.duration) : '';
-      const speed = event.speed ? ` (${event.speed})` : '';
-      ui.setState(`${event.percent}%${left}${speed}`);
-      updateBatch(entry.name, event.percent);
-    } else if (event.type === 'done') {
-      ui.setPercent(100);
-      ui.setState(`Done in ${formatTime(event.elapsed)}`);
-      ui.setNote(`Saved as <code>${escapeHtml(event.outputName)}</code>`);
-      ui.finish('done');
-    } else if (event.type === 'error') {
-      failure = event.message;
+  try {
+    const res = await fetch('api/convert', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: entry.path }),
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      throw new Error((await res.json().catch(() => ({}))).error || 'conversion failed');
     }
-  });
 
-  if (failure) throw new Error(failure);
+    const eta = createEta();
+    let failure = null;
+
+    await readStream(res, (event) => {
+      if (event.type === 'progress') {
+        ui.setPercent(event.percent);
+        // Progress is reported in seconds of video encoded, so "done" and "total"
+        // for the estimator are media seconds rather than bytes.
+        const left = event.duration ? eta.update(event.seconds, event.duration) : '';
+        const speed = event.speed ? ` (${event.speed})` : '';
+        ui.setState(`${event.percent}%${left}${speed}`);
+        updateBatch(entry.name, event.percent);
+      } else if (event.type === 'done') {
+        ui.setPercent(100);
+        ui.setState(`Done in ${formatTime(event.elapsed)}`);
+        ui.setNote(`Saved as <code>${escapeHtml(event.outputName)}</code>`);
+        ui.finish('done');
+      } else if (event.type === 'error') {
+        failure = event.message;
+      }
+    });
+
+    if (failure) throw new Error(failure);
+  } finally {
+    currentAbort = null;
+  }
 }
 
 /**
