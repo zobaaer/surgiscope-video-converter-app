@@ -19,6 +19,19 @@ an internet connection for the first install step, nothing else.
 **First run warning.** Neither build is signed, so each system warns once. On
 Windows: *More info* → *Run anyway*. On Mac: right-click the app → *Open*.
 
+**Mac: move the app before opening it.** If you received the `.app` from
+someone else (AirDrop, Slack, a download link, etc.) rather than building it
+yourself, macOS marks it quarantined and — since it isn't notarized — runs it
+from a hidden, read-only, randomized location instead of where it actually
+sits ("App Translocation"). The app can't create `output/`/`bin/` there and
+fails with an `ENOENT` on startup. Fix it with either:
+
+- Drag `Video Converter.app` to another folder (e.g. `Applications` or the
+  Desktop) *before* opening it — moving it once is enough, even if you move it
+  right back.
+- Or in Terminal: `xattr -cr "/path/to/Video Converter.app"`, then open it
+  normally.
+
 ## The conversion
 
 Profile `smart-cut-h264-aac-cq28-gop30-v1`:
